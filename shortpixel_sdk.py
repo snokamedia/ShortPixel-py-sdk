@@ -3,6 +3,7 @@ import json
 import os
 import time
 import logging
+import shutil
 
 class ShortPixelSDK:
     def __init__(self, api_key, plugin_version='MYSDK', log_level=logging.INFO):
@@ -125,5 +126,5 @@ class ShortPixelSDK:
             os.makedirs(backup_folder)
         for file_key, file_path in files.items():
             backup_path = os.path.join(backup_folder, os.path.basename(file_path))
-            os.rename(file_path, backup_path)
+            shutil.copy2(file_path, backup_path)
             self.logger.info(f"Backed up {file_path} to {backup_path}")
