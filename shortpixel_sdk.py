@@ -13,32 +13,58 @@ class ShortPixelSDK:
         logging.basicConfig(level=log_level)
         self.logger = logging.getLogger(__name__)
 
-    def optimize_images_by_url(self, url_list, lossy=1, wait=20, **kwargs):
+    def optimize_images_by_url(self, url_list, replace_original=False, lossy=1, wait=20, resize=0, resize_width=1024, resize_height=1024, cmyk2rgb=1, keep_exif=0, convertto=None, bg_remove=None, refresh=0, paramlist=None, returndatalist=None, **kwargs):
         payload = {
             'key': self.api_key,
             'plugin_version': self.plugin_version,
             'lossy': lossy,
             'wait': wait,
+            'resize': resize,
+            'resize_width': resize_width,
+            'resize_height': resize_height,
+            'cmyk2rgb': cmyk2rgb,
+            'keep_exif': keep_exif,
+            'convertto': convertto,
+            'bg_remove': bg_remove,
+            'refresh': refresh,
             'urllist': url_list,
+            'paramlist': paramlist,
+            'returndatalist': returndatalist,
             **kwargs
         }
         response = requests.post(self.reducer_url, data=json.dumps(payload))
-        return response.json()
+        result = response.json()
+        if replace_original:
+            self.replace_original_files(result)
+        return result
 
-    def optimize_images_by_file(self, file_paths, lossy=1, wait=30, **kwargs):
+    def optimize_images_by_file(self, file_paths, replace_original=False, lossy=1, wait=30, resize=0, resize_width=1024, resize_height=1024, cmyk2rgb=1, keep_exif=0, convertto=None, bg_remove=None, refresh=0, paramlist=None, returndatalist=None, **kwargs):
         files = {name: open(path, 'rb') for name, path in file_paths.items()}
         payload = {
             'key': self.api_key,
             'plugin_version': self.plugin_version,
             'lossy': lossy,
             'wait': wait,
+            'resize': resize,
+            'resize_width': resize_width,
+            'resize_height': resize_height,
+            'cmyk2rgb': cmyk2rgb,
+            'keep_exif': keep_exif,
+            'convertto': convertto,
+            'bg_remove': bg_remove,
+            'refresh': refresh,
             'file_paths': json.dumps(file_paths),
+            'paramlist': paramlist,
+            'returndatalist': returndatalist,
             **kwargs
         }
         response = requests.post(self.post_reducer_url, files=files, data=payload)
         for file in files.values():
             file.close()
-        return response.json()
+        result = response.json()
+        if replace_original:
+            self.replace_original_files(result, local_file_paths=file_paths)
+        return result
 
     def check_image_status(self, url, lossy=1, wait=20):
         payload = {
@@ -51,10 +77,10 @@ class ShortPixelSDK:
         response = requests.post(self.reducer_url, data=json.dumps(payload))
         return response.json()
 
-    def batch_optimize_images(self, url_list, lossy=1, wait=20, **kwargs):
+    def batch_optimize_images(self, url_list, replace_original=False, lossy=1, wait=20, **kwargs):
         results = []
         for url in url_list:
-            result = self.optimize_images_by_url([url], lossy=lossy, wait=wait, **kwargs)
+            result = self.optimize_images_by_url([url], replace_original=replace_original, lossy=lossy, wait=wait, **kwargs)
             if result[0]['Status']['Code'] == 1:
                 for _ in range(wait):
                     time.sleep(1)
@@ -64,7 +90,7 @@ class ShortPixelSDK:
             results.append(result)
         return results
 
-    def optimize_folder(self, folder_path, lossy=1, wait=30, resize=None, keep_exif=False, backup_folder=None, **kwargs):
+    def optimize_folder(self, folder_path, replace_original=False, lossy=1, wait=30, resize=None, keep_exif=False, backup_folder=None, **kwargs):
         files = {f"file{index}": os.path.join(folder_path, file) for index, file in enumerate(os.listdir(folder_path))}
         if backup_folder:
             self.backup_files(files, backup_folder)
@@ -78,8 +104,21 @@ class ShortPixelSDK:
         }
         if resize:
             payload.update({'resize': 1, 'resize_width': resize[0], 'resize_height': resize[1]})
-        response = self.optimize_images_by_file(files, **payload)
-        return response
+        result = self.optimize_images_by_file(files, replace_original=replace_original, **payload)
+        return result
+
+    def replace_original_files(self, results, local_file_paths=None):
+        for result in results:
+            if result['Status']['Code'] == "2":
+                optimized_url = result.get('LossyURL') or result.get('LosslessURL')
+                if optimized_url:
+                    file_key = result.get('Key')
+                    if local_file_paths and file_key in local_file_paths:
+                        local_path = local_file_paths[file_key]
+                        optimized_image = requests.get(optimized_url).content
+                        with open(local_path, 'wb') as f:
+                            f.write(optimized_image)
+                            self.logger.info(f"Replaced original file with optimized file: {local_path}")
 
     def backup_files(self, files, backup_folder):
         if not os.path.exists(backup_folder):
